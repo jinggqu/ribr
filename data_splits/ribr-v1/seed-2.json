@@ -1,0 +1,62 @@
+{
+  "protocol": "ribr-v1",
+  "seed": 2,
+  "view_sha256": "35270e8ce92e195dc188a8578082f387d80d28da08dd82c38020e5bd3045dc3c",
+  "counts": {
+    "BUS-UCLM": {
+      "train": 138,
+      "val": 18,
+      "test": 18
+    },
+    "BUSI": {
+      "train": 517,
+      "val": 65,
+      "test": 65
+    },
+    "Breast-Lesions-USG": {
+      "train": 201,
+      "val": 26,
+      "test": 25
+    },
+    "DDTI": {
+      "train": 509,
+      "val": 64,
+      "test": 64
+    },
+    "LN-EXT": {
+      "train": 310,
+      "val": 40,
+      "test": 40
+    },
+    "LN-INT": {
+      "train": 1019,
+      "val": 127,
+      "test": 127
+    },
+    "LymphUS-Center-1": {
+      "train": 144,
+      "test": 18,
+      "val": 18
+    },
+    "LymphUS-Center-2": {
+      "train": 125,
+      "val": 17,
+      "test": 16
+    },
+    "Prostate": {
+      "test": 690,
+      "train": 1738,
+      "val": 193
+    },
+    "TN3K": {
+      "test": 614,
+      "train": 2591,
+      "val": 288
+    },
+    "ThyroidXL": {
+      "train": 8586,
+      "test": 2094,
+      "val": 955
+    }
+  }
+}

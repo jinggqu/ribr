@@ -1,0 +1,17 @@
+{
+  "protocol": "ribr-v1",
+  "data_root_env": "ULTRASOUND_DATA_ROOT",
+  "default_data_root": "/home/q/datasets/ultrasound",
+  "catalog": "catalog/samples-v1.csv",
+  "catalog_sha256": "474bd41469a560d719bafc6d4617909f6ab8a94a7039bf5a93918d3e61fc9d82",
+  "derivative": "resize256-v1",
+  "derivative_manifest": "derivatives/resize256-v1/manifest.csv",
+  "derivative_manifest_sha256": "80e88f8b959a8f23f0d42ac776ecfccabe8defeae1ed6d4d37460d9f3baaee38",
+  "view": "data_views/ribr-v1.csv",
+  "view_sha256": "35270e8ce92e195dc188a8578082f387d80d28da08dd82c38020e5bd3045dc3c",
+  "splits": {
+    "1": "e3bba82d02de166dcfbe603c7ee56552efbb5e12dbd2d8ef11e42bb7976b9218",
+    "2": "f5a9164e0470e104357709ec934f54c3b310a697935908fd0dc91c4ddb6eb800",
+    "3": "b2aa8f103510f4eab1e3684944a93700a749b282a2f163a6b0e0745d59aecd8e"
+  }
+}

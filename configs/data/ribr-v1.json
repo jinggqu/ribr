@@ -1,0 +1,25 @@
+{
+  "id": "ribr-v1",
+  "data_root_env": "ULTRASOUND_DATA_ROOT",
+  "default_data_root": "/home/q/datasets/ultrasound",
+  "catalog": "catalog/samples-v1.csv",
+  "derivative": "resize256-v1",
+  "derivative_manifest": "derivatives/resize256-v1/manifest.csv",
+  "view": "data_views/ribr-v1.csv",
+  "split_root": "data_splits/ribr-v1",
+  "tasks": {
+    "segmentation": {
+      "mask_status": ["nonempty"]
+    },
+    "classification": {
+      "mask_status": ["nonempty"],
+      "class_label_required": true
+    }
+  },
+  "split_protocol": {
+    "seeds": [1, 2, 3],
+    "default_val_ratio": 0.1,
+    "default_test_ratio": 0.1,
+    "fixed_test_datasets": ["Prostate", "TN3K", "ThyroidXL"]
+  }
+}
