@@ -1,5 +1,7 @@
 # RIBR Ultrasound Segmentation
 
+[[Paper](http://arxiv.org/abs/2607.21787)] [[Datasets](https://github.com/jinggqu/ribr/releases)]
+
 Minimal training and evaluation code for **Risk-Routed Implicit Boundary
 Refinement for Robust Ultrasound Image Segmentation**.
 
