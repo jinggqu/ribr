@@ -1,7 +1,7 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+
 from tqdm import tqdm
 
 
@@ -14,7 +14,7 @@ class TqdmHandler(logging.Handler):
             self.handleError(record)
 
 
-def setup_logger(name: str, log_dir: Optional[str] = None) -> logging.Logger:
+def setup_logger(name: str, log_dir: str | None = None) -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     logger.handlers.clear()

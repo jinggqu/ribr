@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import datetime as _datetime
+import datetime as dt
 import math
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -188,11 +188,10 @@ class SegmentationEval:
         )
 
 
-
-
 def make_results_dir(base_dir: str | Path, *, score_name: str, score_value: float, timestamp_fmt: str) -> Path:
     safe_score = float(score_value) if math.isfinite(float(score_value)) else float("nan")
-    folder = Path(base_dir) / f"{_datetime.datetime.now().strftime(timestamp_fmt)}-{score_name}{safe_score:.2f}"
+    timestamp = dt.datetime.now(tz=dt.UTC).astimezone().strftime(timestamp_fmt)
+    folder = Path(base_dir) / f"{timestamp}-{score_name}{safe_score:.2f}"
     folder.mkdir(parents=True, exist_ok=True)
     return folder
 

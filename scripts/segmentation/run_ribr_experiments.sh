@@ -4,10 +4,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
+cd "${SCRIPT_DIR}/../.."
 
 export_model_runtime_env
 
 DEVICE="${DEVICE:-$(default_primary_device)}"
+VARIANT="${VARIANT:-full}"
+case "$VARIANT" in
+    conv-only|gsbr-only|bri-only|bri-gsbr|bri-rrc|full) ;;
+    *) echo "Unsupported VARIANT=$VARIANT" >&2; exit 1 ;;
+esac
+EXP_PREFIX="ribr-${VARIANT}"
 validate_experiment_device "$DEVICE"
 OUTPUT_DIR="${OUTPUT_DIR:-runs}"
 DATA_ROOT="${DATA_ROOT:-${ULTRASOUND_DATA_ROOT:-${HOME}/datasets/ultrasound}}"
@@ -29,6 +36,7 @@ DATA_PROTOCOL_ARGS=(
     --derivative-manifest "$DERIVATIVE_MANIFEST"
 )
 RIBR_SURFACE_ARGS=(
+    --variant "$VARIANT"
     --checkpoint-score balanced_seg
     --boundary-loss-alpha 0.6
     --boundary-factor 5.0
@@ -40,6 +48,9 @@ RIBR_SURFACE_ARGS=(
     --risk-route-scale 0.25
     --boundary-residual-scale 1.0
 )
+if [[ "${ALLOW_NONPAPER_SPLITS:-0}" == 1 ]]; then
+    RIBR_SURFACE_ARGS+=(--allow-nonpaper-splits)
+fi
 
 prepare_run_log "$RUN_LOG"
 exec > >(tee -a "$RUN_LOG") 2>&1
@@ -48,7 +59,7 @@ run_train_and_internal_test() {
     local seed="$1"
     local dataset="$2"
     uv run python -m src.methods.ribr.train_seg \
-        --exp "ribr-${seed}" \
+        --exp "${EXP_PREFIX}-${seed}" \
         --dataset "$dataset" \
         --data-root "$DATA_ROOT" \
         "${DATA_PROTOCOL_ARGS[@]}" \
@@ -68,9 +79,9 @@ run_external_test() {
     local seed="$1"
     local train_dataset="$2"
     local test_dataset="$3"
-    local checkpoint="${OUTPUT_DIR}/ribr-${seed}/${train_dataset}/${IMG_SIZE}/train/best_model.pt"
+    local checkpoint="${OUTPUT_DIR}/${EXP_PREFIX}-${seed}/${train_dataset}/${IMG_SIZE}/train/best_model.pt"
     uv run python -m src.methods.ribr.train_seg \
-        --exp "ribr-${seed}" \
+        --exp "${EXP_PREFIX}-${seed}" \
         --dataset "$test_dataset" \
         --data-root "$DATA_ROOT" \
         "${DATA_PROTOCOL_ARGS[@]}" \
@@ -79,7 +90,6 @@ run_external_test() {
         --device "$DEVICE" \
         --output-dir "$OUTPUT_DIR" \
         --checkpoint "$checkpoint" \
-        --test-all-splits \
         --test \
         "${RIBR_SURFACE_ARGS[@]}"
 }
@@ -88,12 +98,12 @@ for dataset in "${TRAIN_DATASETS[@]}"; do
     EXTERNALS=($(resolve_external_datasets_for_task segmentation "$dataset"))
     for seed in "${SEEDS[@]}"; do
         echo "=== RIBR seed=${seed} train=${dataset} device=${DEVICE} ==="
-        if has_completed_results ribr "$seed" "$dataset" "$IMG_SIZE" test; then
+        if has_completed_results "$EXP_PREFIX" "$seed" "$dataset" "$IMG_SIZE" test; then
             announce_skip_completed "ribr-${seed} ${dataset} internal test"
-        elif has_training_complete_marker ribr "$seed" "$dataset" "$IMG_SIZE"; then
+        elif has_training_complete_marker "$EXP_PREFIX" "$seed" "$dataset" "$IMG_SIZE"; then
             announce_resume_eval "ribr-${seed} ${dataset} internal test"
             uv run python -m src.methods.ribr.train_seg \
-                --exp "ribr-${seed}" \
+                --exp "${EXP_PREFIX}-${seed}" \
                 --dataset "$dataset" \
                 --data-root "$DATA_ROOT" \
                 "${DATA_PROTOCOL_ARGS[@]}" \
@@ -108,11 +118,11 @@ for dataset in "${TRAIN_DATASETS[@]}"; do
         fi
         for external_dataset in "${EXTERNALS[@]}"; do
             echo "=== RIBR seed=${seed} external=${external_dataset} device=${DEVICE} ==="
-            if has_completed_results ribr "$seed" "$external_dataset" "$IMG_SIZE" test; then
+            if has_completed_results "$EXP_PREFIX" "$seed" "$external_dataset" "$IMG_SIZE" test; then
                 announce_skip_completed "ribr-${seed} ${dataset} -> ${external_dataset} external test"
                 continue
             fi
-            if ! internal_run_finished ribr "$seed" "$dataset" "$IMG_SIZE"; then
+            if ! internal_run_finished "$EXP_PREFIX" "$seed" "$dataset" "$IMG_SIZE"; then
                 echo "Skip external eval until internal run finishes: ribr-${seed} ${dataset} -> ${external_dataset}"
                 continue
             fi

@@ -47,21 +47,12 @@ has_completed_results() {
     if [[ ! -d "$result_root" ]]; then
         return 1
     fi
-    find "$result_root" -mindepth 2 -maxdepth 2 -type f -name 'results.csv' | grep -q .
+    [[ -n "$(find "$result_root" -mindepth 2 -maxdepth 2 -type f -name 'results.csv' -print -quit)" ]]
 }
 
 announce_skip_completed() {
     local label="$1"
     echo "Skip completed: ${label}"
-}
-
-has_best_model_checkpoint() {
-    local exp_prefix="$1"
-    local seed="$2"
-    local dataset="$3"
-    local img_size="$4"
-    local output_root="${OUTPUT_DIR:-runs}"
-    [[ -f "${output_root}/${exp_prefix}-${seed}/${dataset}/${img_size}/train/best_model.pt" ]]
 }
 
 announce_resume_eval() {
@@ -129,9 +120,6 @@ default_segmentation_external_datasets_for() {
     case "$dataset" in
     LN-INT)
         echo "LymphUS-Center-1 LymphUS-Center-2"
-        ;;
-    LymphUS-Center-1)
-        echo "LymphUS-Center-2"
         ;;
     BUSI)
         echo "Breast-Lesions-USG BUS-UCLM"

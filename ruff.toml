@@ -1,1 +1,26 @@
 line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["ALL"]
+ignore = [
+    # Conflicting docstring conventions and formatter-managed commas.
+    "D203", "D213", "COM812", "ISC001",
+    # Keep the existing lightweight API, without annotation/docstring boilerplate.
+    "ANN", "D100", "D101", "D102", "D103", "D104", "D105", "D107", "TC003",
+    # Inline error messages and existing positional flags remain supported.
+    "EM101", "EM102", "TRY003", "FBT001", "FBT002",
+    # Tensor dimensions and model/training routines follow the research implementation.
+    "PLR2004", "PLR0912", "PLR0913", "PLR0915", "C901",
+    # Namespace packages do not require additional __init__.py files.
+    "INP001",
+]
+
+[lint.per-file-ignores]
+# Seeded augmentation is not security-sensitive randomness.
+"src/datasets/segmentation.py" = ["S311", "NPY002", "N812"]
+# Logging handlers delegate output failures to logging.Handler.handleError.
+"src/utils/logger.py" = ["BLE001"]
+# Preserve NumPy's seeded global RNG and standard PyTorch functional aliases.
+"src/utils/tools.py" = ["NPY002"]
+"src/utils/losses.py" = ["N812"]

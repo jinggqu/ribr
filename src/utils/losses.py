@@ -1,11 +1,11 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from scipy.ndimage import distance_transform_edt
+from torch import nn
 
 
 def _spatial_size_from_flat(num_points: int) -> int:
-    spatial_size = int(round(num_points**0.5))
+    spatial_size = round(num_points**0.5)
     if spatial_size * spatial_size != num_points:
         raise ValueError(f"Expected square flattened mask/logits, got {num_points} points")
     return spatial_size
@@ -38,44 +38,6 @@ def _signed_distance_targets(masks_hw: torch.Tensor, truncation: float) -> torch
     return torch.stack(targets, dim=0).to(device=masks_hw.device, dtype=torch.float32)
 
 
-class MSELoss(nn.Module):
-    def __init__(self, alpha=1.0, reduction="mean", zero_weight=0.01):
-        super(MSELoss, self).__init__()
-        self.alpha = alpha
-        self.reduction = reduction
-        self.zero_weight = zero_weight
-        if self.reduction in ["sum", "mean"]:
-            self.mse_loss = nn.MSELoss()
-        else:
-            self.mse_loss = nn.MSELoss(reduction="none")
-
-    def forward(self, data_packet):
-        images = data_packet["images"]
-        masks = data_packet["masks"]
-        inr_output = data_packet["output"]["inr_output"]
-        if self.reduction in ["mean", "sum"]:
-            mse_loss = self.mse_loss(inr_output, images)
-        else:
-            weights = torch.where(masks == 0, self.zero_weight, 1.0)
-            mse_loss_main = weights * torch.abs(inr_output - images) ** 2
-            mse_loss = torch.sum(mse_loss_main) / torch.sum(weights)
-        return mse_loss * self.alpha
-
-
-class CharbonnierLoss(nn.Module):
-    def __init__(self, alpha=1.0, epsilon=1e-3):
-        super(CharbonnierLoss, self).__init__()
-        self.alpha = alpha
-        self.epsilon = epsilon
-
-    def forward(self, data_packet):
-        images = data_packet["images"]
-        inr_output = data_packet["output"]["inr_output"]
-        diff = inr_output - images
-        loss = torch.sqrt(diff * diff + self.epsilon * self.epsilon)
-        return loss.mean() * self.alpha
-
-
 class DiceSemanticLoss(nn.Module):
     def __init__(self, num_classes=2, alpha=1.0, smoothing=1e-5):
         super().__init__()
@@ -96,7 +58,7 @@ class DiceSemanticLoss(nn.Module):
 
 class FocalSemanticLoss(nn.Module):
     def __init__(self, alpha=1.0, gamma=2.0):
-        super(FocalSemanticLoss, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.gamma = gamma
 
@@ -195,8 +157,9 @@ class BoundaryBandSDFLoss(nn.Module):
 
 
 class SpeckleAwareSmoothnessLoss(nn.Module):
-    """Penalize foreground-probability oscillation in non-boundary regions, weighted
-    inversely to local speckle strength (image intensity std). Uniform regions are forced
+    """Penalize foreground-probability oscillation away from the boundary band.
+
+    Weights decrease with local speckle strength (image intensity std). Uniform regions are forced
     smooth; high-speckle regions are left alone so the model is not punished for texture.
     """
 
@@ -241,10 +204,24 @@ class SpeckleAwareSmoothnessLoss(nn.Module):
         return 0.5 * (loss_x + loss_y) * self.alpha
 
 
+class ResidualMagnitudeLoss(nn.Module):
+    """Mean square of the ungated residual over batch, pixels, and both classes."""
+
+    def __init__(self, alpha=0.06):
+        super().__init__()
+        self.alpha = alpha
+
+    def forward(self, data_packet):
+        residual = data_packet["output"]["boundary_residual_output"]
+        if residual is None:
+            raise ValueError("Residual magnitude supervision requires an active BRI branch")
+        return residual.square().mean() * self.alpha
+
+
 class LossFunction(nn.Module):
-    def __init__(self, loss_funcs=None):
-        super(LossFunction, self).__init__()
-        self.loss_funcs = {"mse": MSELoss(alpha=1.0)} if loss_funcs is None else loss_funcs
+    def __init__(self, loss_funcs):
+        super().__init__()
+        self.loss_funcs = loss_funcs
 
     def forward(self, data_packet):
         total_loss = 0.0

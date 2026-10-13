@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 
 from src.utils.tensors import probe_coordinate_feature_dim, probe_coordinate_features_map
 
@@ -8,7 +8,7 @@ from src.utils.tensors import probe_coordinate_feature_dim, probe_coordinate_fea
 class SineLayer(nn.Module):
     """SIREN activation layer. See Sitzmann et al., NeurIPS 2020, Sec 3.2."""
 
-    def __init__(self, in_features, out_features, bias=True, is_first=False, omega_0=30, scale=10.0, init_weights=True):
+    def __init__(self, in_features, out_features, bias=True, is_first=False, omega_0=30, init_weights=True):
         super().__init__()
         self.omega_0 = omega_0
         self.is_first = is_first
@@ -26,8 +26,8 @@ class SineLayer(nn.Module):
                     -np.sqrt(6 / self.in_features) / self.omega_0, np.sqrt(6 / self.in_features) / self.omega_0
                 )
 
-    def forward(self, input):
-        return torch.sin(self.omega_0 * self.linear(input))
+    def forward(self, inputs):
+        return torch.sin(self.omega_0 * self.linear(inputs))
 
 
 def _coords_from_shape(height, width, device, dtype):
@@ -50,6 +50,7 @@ def _foreground_moments_from_probs(coarse_probs):
 
 
 def _compute_isotropic_relative_coords(coords, foreground, mass, center, centered):
+    """Historical name: the scale is the probability-weighted SD of each axis."""
     scale = torch.sqrt((foreground * centered.square()).sum(dim=1, keepdim=True) / mass + 1e-4).clamp_min(0.20)
     relative = (coords - center) / scale
     return relative.clamp(-4.0, 4.0)
@@ -93,17 +94,17 @@ class SpatialSegHead(nn.Module):
         self.head = nn.Conv2d(hidden_features // 2, output_features, 1)
 
     def forward(self, features, spatial_shape=None):
-        B = features.shape[0]
+        batch = features.shape[0]
         if spatial_shape is None:
-            H = W = self.img_size
+            height = width = self.img_size
         else:
-            H, W = spatial_shape
+            height, width = spatial_shape
         x = self.fuse(features)
-        x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2)
+        x = x.reshape(batch, height, width, -1).permute(0, 3, 1, 2)
         x = self.act(self.res_block(x) + x)
         x = self.conv_down(x)
         x = self.head(x)
-        return x.permute(0, 2, 3, 1).reshape(B, H * W, -1)
+        return x.permute(0, 2, 3, 1).reshape(batch, height * width, -1)
 
 
 def _group_count(num_channels: int, max_groups: int = 8) -> int:
@@ -275,7 +276,6 @@ class ImageEncoder(nn.Module):
         return latent
 
 
-
 class RIBRConvBackbone(nn.Module):
     """Convolutional coarse segmentation backbone used by RIBR."""
 
@@ -289,7 +289,6 @@ class RIBRConvBackbone(nn.Module):
     ):
         super().__init__()
         self.use_relative_coords = inr_config.get("use_relative_coords", False)
-        self.relative_coord_mode = inr_config.get("relative_coord_mode", "isotropic")
         self.use_coarse_context = inr_config.get("use_coarse_context", True)
         self.use_anatomy_style_split = inr_config.get("use_anatomy_style_split", False)
         self.use_probe_coords = inr_config.get("use_probe_coords", False)
@@ -298,7 +297,6 @@ class RIBRConvBackbone(nn.Module):
         self.coarse_segmentation_residual_scale = coarse_segmentation_residual_scale
         self.use_occlusion_field = segmentation_config.get("use_occlusion_field", False)
         self.refine_segmentation = segmentation_config.get("refine_segmentation", False)
-        self.boundary_refinement_module = segmentation_config.get("boundary_refinement_module", False)
         self.encoder = ImageEncoder(
             in_channels=inr_config["in_channels"],
             base_channels=inr_config["encoder_channels"],
@@ -352,7 +350,9 @@ class RIBRConvBackbone(nn.Module):
             img_size=img_size,
         )
         if self.refine_segmentation:
-            refine_in_channels = segmentation_config["output_features"] + self.encoder.local_channels + inr_config["num_classes"]
+            refine_in_channels = (
+                segmentation_config["output_features"] + self.encoder.local_channels + inr_config["num_classes"]
+            )
             if self.use_coarse_context:
                 refine_in_channels += 1
             if self.use_occlusion_field:
@@ -476,7 +476,6 @@ class RIBRConvBackbone(nn.Module):
         }
 
 
-
 class BoundaryRefinementImplicitResidual(nn.Module):
     """Module B: Boundary-Refinement Implicit Residual.
 
@@ -490,8 +489,8 @@ class BoundaryRefinementImplicitResidual(nn.Module):
         num_classes,
         residual_hidden=32,
         residual_layers=2,
-        gate_tau=0.5,
-        gate_gamma=10.0,
+        gate_tau=0.65,
+        gate_gamma=12.0,
         first_omega_0=20.0,
         hidden_omega_0=15.0,
     ):
@@ -500,9 +499,7 @@ class BoundaryRefinementImplicitResidual(nn.Module):
         self.gate_gamma = float(gate_gamma)
         residual_in = 2 + 2 + feature_channels + 2 + 1 + 1
         self.residual_layers = nn.ModuleList()
-        self.residual_layers.append(
-            SineLayer(residual_in, residual_hidden, is_first=True, omega_0=first_omega_0)
-        )
+        self.residual_layers.append(SineLayer(residual_in, residual_hidden, is_first=True, omega_0=first_omega_0))
         for _ in range(max(residual_layers - 1, 0)):
             self.residual_layers.append(
                 SineLayer(residual_hidden, residual_hidden, is_first=False, omega_0=hidden_omega_0)
@@ -543,11 +540,11 @@ class BoundaryRefinementImplicitResidual(nn.Module):
 class RiskRoutedResidualControl(nn.Module):
     """Module C: Risk-Routed Residual Control.
 
-    A detached risk route adjusts where the implicit residual is allowed to act.
+    Detached head inputs adjust an uncertainty prior whose direct path is differentiable.
     The residual L2 term is added in training as the companion magnitude control.
     """
 
-    def __init__(self, route_scale=0.5):
+    def __init__(self, route_scale=0.25):
         super().__init__()
         self.route_scale = float(route_scale)
         self.risk_route_head = nn.Conv2d(6, 1, 1)
@@ -562,7 +559,7 @@ class RiskRoutedResidualControl(nn.Module):
         dy = torch.zeros_like(gray)
         dx[:, :, :, 1:] = (gray[:, :, :, 1:] - gray[:, :, :, :-1]).abs()
         dy[:, :, 1:, :] = (gray[:, :, 1:, :] - gray[:, :, :-1, :]).abs()
-        grad = torch.sqrt(dx * dx + dy * dy + 1e-8)
+        grad = torch.linalg.vector_norm(torch.cat([dx, dy], dim=1), dim=1, keepdim=True)
         scale = grad.detach().amax(dim=(2, 3), keepdim=True).clamp_min(1e-6)
         return grad / scale
 
@@ -603,14 +600,25 @@ class RIBRSegmentationModel(RIBRConvBackbone):
         coarse_segmentation_residual_scale=1.0,
         residual_hidden=32,
         residual_layers=2,
-        gate_tau=0.5,
-        gate_gamma=10.0,
-        risk_route_scale=0.5,
+        gate_tau=0.65,
+        gate_gamma=12.0,
+        risk_route_scale=0.25,
         boundary_residual_scale=1.0,
         local_stat_window=5,
         first_omega_0=20.0,
         hidden_omega_0=15.0,
+        use_bri=True,
+        use_gsbr=True,
+        use_rrc=True,
     ):
+        if inr_config["in_channels"] != 1 or inr_config["num_classes"] != 2:
+            raise ValueError("RIBR implements single-channel binary segmentation")
+        if use_rrc and not use_bri:
+            raise ValueError("RRC requires BRI residuals")
+        if local_stat_window < 1 or local_stat_window % 2 == 0:
+            raise ValueError("local_stat_window must be positive and odd")
+        if residual_hidden < 1 or residual_layers < 1:
+            raise ValueError("The SIREN needs positive width and at least one hidden layer")
         super().__init__(
             inr_config,
             segmentation_config,
@@ -619,20 +627,27 @@ class RIBRSegmentationModel(RIBRConvBackbone):
             coarse_segmentation_residual_scale,
         )
         self.local_stat_window = int(local_stat_window)
+        self.use_bri, self.use_gsbr, self.use_rrc = use_bri, use_gsbr, use_rrc
         self.boundary_residual_scale = float(boundary_residual_scale)
         feature_channels = inr_config["hidden_features"]
-        self.boundary_refinement_residual = BoundaryRefinementImplicitResidual(
-            feature_channels=feature_channels,
-            num_classes=inr_config["num_classes"],
-            residual_hidden=residual_hidden,
-            residual_layers=residual_layers,
-            gate_tau=gate_tau,
-            gate_gamma=gate_gamma,
-            first_omega_0=first_omega_0,
-            hidden_omega_0=hidden_omega_0,
+        self.boundary_refinement_residual = (
+            BoundaryRefinementImplicitResidual(
+                feature_channels=feature_channels,
+                num_classes=inr_config["num_classes"],
+                residual_hidden=residual_hidden,
+                residual_layers=residual_layers,
+                gate_tau=gate_tau,
+                gate_gamma=gate_gamma,
+                first_omega_0=first_omega_0,
+                hidden_omega_0=hidden_omega_0,
+            )
+            if use_bri
+            else None
         )
-        self.geometry_speckle_boundary_regularizer = GeometrySpeckleBoundaryRegularizationHead(feature_channels)
-        self.risk_routed_control = RiskRoutedResidualControl(risk_route_scale)
+        self.geometry_speckle_boundary_regularizer = (
+            GeometrySpeckleBoundaryRegularizationHead(feature_channels) if use_gsbr else None
+        )
+        self.risk_routed_control = RiskRoutedResidualControl(risk_route_scale) if use_rrc else None
 
     def _local_stats(self, images_bchw):
         k = self.local_stat_window
@@ -643,12 +658,26 @@ class RIBRSegmentationModel(RIBRConvBackbone):
         return torch.cat([mean, std], dim=1)
 
     def forward(self, coords, images):
+        if (
+            images.ndim != 4
+            or images.shape[1] != 1
+            or min(images.shape[-2:]) < 8
+            or any(side % 8 for side in images.shape[-2:])
+        ):
+            raise ValueError("Expected (B, 1, H, W) images with H and W positive multiples of eight")
         out = super().forward(coords, images)
         height, width = images.shape[-2:]
         batch = images.shape[0]
         device, dtype = images.device, images.dtype
 
         feature_map = self._flat_to_map(out["ribr_features"], (height, width))
+        out["sdf_output"] = (
+            self._flatten_map(self.geometry_speckle_boundary_regularizer(feature_map)) if self.use_gsbr else None
+        )
+        if not self.use_bri:
+            out["boundary_residual_output"] = None
+            out["gate_output"] = None
+            return out
         local_stats = self._local_stats(images)
 
         coords_flat = coords.expand(batch, -1, -1)
@@ -662,12 +691,14 @@ class RIBRSegmentationModel(RIBRConvBackbone):
         if confidence is None:
             confidence = torch.zeros(batch, 1, height, width, device=device, dtype=dtype)
 
-        # Boundary-proximal gate from coarse foreground probability: proximity is 1 where
-        # fg=0.5 (boundary) and 0 where fg is 0 or 1 (interior/exterior). alpha then turns
-        # the residual on only inside a tunable band, decoupling it from speckle statistics.
+        # Predictive uncertainty is a soft prior, not geometric contour distance.
+        # All pixels receive a residual evaluation; the sigmoid weights its contribution.
         fg = coarse_fg.clamp(0.0, 1.0)
         boundary_proximity = (1.0 - (fg - 0.5).abs() * 2.0).clamp(0.0, 1.0)
-        risk_score, risk_delta = self.risk_routed_control(images, boundary_proximity, fg, confidence, local_stats)
+        if self.use_rrc:
+            risk_score, risk_delta = self.risk_routed_control(images, boundary_proximity, fg, confidence, local_stats)
+        else:
+            risk_score, risk_delta = torch.zeros_like(fg), torch.zeros_like(fg)
 
         residual, alpha_flat = self.boundary_refinement_residual(
             coords_flat=coords_flat,
@@ -679,6 +710,9 @@ class RIBRSegmentationModel(RIBRConvBackbone):
             risk_score=risk_score,
         )
 
+        if not self.use_rrc:
+            alpha_flat = torch.ones_like(alpha_flat)
+
         hybrid_logits = out["segmentation_output"] + self.boundary_residual_scale * alpha_flat * residual
 
         out["segmentation_output"] = hybrid_logits
@@ -687,5 +721,4 @@ class RIBRSegmentationModel(RIBRConvBackbone):
         out["risk_route_delta_output"] = self._flatten_map(risk_delta)
         out["risk_route_score_output"] = self._flatten_map(risk_score)
         out["boundary_proximity_map"] = boundary_proximity
-        out["sdf_output"] = self._flatten_map(self.geometry_speckle_boundary_regularizer(feature_map))
         return out

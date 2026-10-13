@@ -17,7 +17,7 @@ def probe_coordinate_feature_dim(mode: str) -> int:
 
 
 def infer_square_spatial_shape(num_points: int) -> tuple[int, int]:
-    side = int(round(num_points**0.5))
+    side = round(num_points**0.5)
     if side * side != num_points:
         raise ValueError(f"Expected a square flattened image, got {num_points} pixels")
     return side, side
